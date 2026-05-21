@@ -2,7 +2,7 @@
 
 // Mapping prefix mã đơn → Group ID Telegram của kênh T3
 const PAYMENT_CHANNEL_MAP = {
-  "HOYAPAY":   "-1003793924107",
+  "JINDOR":   "-1003793924107",
 };
 
 // Tập hợp tất cả Group ID của T3 (để nhận dạng tin nhắn từ nhóm T3)
