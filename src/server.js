@@ -2,6 +2,7 @@
 require("dotenv").config();
 const express  = require("express");
 const axios    = require("axios");
+const path     = require("path");
 const FormData = require("form-data");
 const cors     = require("cors");
 const helmet   = require("helmet");
@@ -25,11 +26,11 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 app.set("trust proxy", 1);
-app.use(helmet());
+app.use(helmet({contentSecurityPolicy: false,}));;
 app.use(cors({ origin: "*" }));
+app.use(express.static(path.join(__dirname, "public")));  // ← thêm vào đây
 app.use(express.json({ limit: "20kb" }));
 app.use("/webhook", rateLimit({ windowMs: 60000, max: 200, standardHeaders: true, legacyHeaders: false }));
-
 // ── Logs ──────────────────────────────────────────────────────────────────────
 const recentLogs = [];
 const _origInfo  = logger.info.bind(logger);
@@ -42,6 +43,36 @@ function pushLog(level, msg, meta) {
 logger.info  = (m, d) => { pushLog("info",  m, d); _origInfo(m,  d); };
 logger.error = (m, d) => { pushLog("error", m, d); _origError(m, d); };
 logger.warn  = (m, d) => { pushLog("warn",  m, d); _origWarn(m,  d); };
+
+// ── Duplicate transferContent registry (in-memory) ───────────────────────────
+const ckRegistry = new Map(); // ck_lower -> { username, time }
+
+function ckRegister(ck, username) {
+  if (ckRegistry.size > 10000) {
+    // Xoá entry cũ nhất khi đầy
+    ckRegistry.delete(ckRegistry.keys().next().value);
+  }
+  const key = ck.toLowerCase().trim();
+  if (!ckRegistry.has(key)) {
+    ckRegistry.set(key, { username: (username || "").toLowerCase().trim(), time: new Date() });
+  }
+}
+
+function ckCheckDuplicate(ck, username) {
+  const key = ck.toLowerCase().trim();
+  const existing = ckRegistry.get(key);
+  if (!existing) return false;
+  // Cùng username → không phải duplicate (tra lại)
+  if (existing.username === (username || "").toLowerCase().trim()) return false;
+  return true;
+}
+
+// ── Urgent dedup — chặn gửi TG trùng lặp ────────────────────────────────────
+const urgentSentSet = new Set();
+
+function urgentNorm(ck) {
+  return (ck || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
 
 // ── Routes cơ bản ─────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({
@@ -76,6 +107,16 @@ app.post("/api/check-invoice", checkInvoiceLimit, upload.single("image"), async 
   }
 
   logger.info("Web check-invoice", { username: username || "-", ck: transferContent || "-", hasImage: !!imageBuffer });
+
+  // ── Duplicate transferContent check ────────────────────────────────────────
+  if (transferContent && transferContent.trim().length >= 4) {
+    if (ckCheckDuplicate(transferContent, username)) {
+      logger.warn("Duplicate CK detected", { ck: transferContent, by: username });
+      return res.json({ found: false, duplicate: true });
+    }
+    // Ghi nhận lần đầu dùng CK này
+    ckRegister(transferContent, username);
+  }
 
   try {
     const result = await searchInvoiceByAll({
@@ -122,10 +163,32 @@ app.post("/api/urgent-invoice", upload.single("image"), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Thiếu tài khoản hoặc mã giao dịch" });
     }
 
+    // ── Chặn gửi TG duplicate ─────────────────────────────────────────────────
+    const ckKey = urgentNorm(transferContent);
+    if (ckKey && urgentSentSet.has(ckKey)) {
+      logger.info("Urgent duplicate suppressed", { username, ck: transferContent });
+      return res.json({ ok: true });
+    }
+    if (ckKey) urgentSentSet.add(ckKey);
+
     // ── Tra Deposit Remark bằng Playwright BO browser ────────────────────────────
     let orderCode = "-";
     try {
       const depositRemark = await fetchDepositRemarkByUsername(username, transferContent);
+
+      // Đơn đã lên điểm → trả về thẳng cho frontend, không escalate
+      if (depositRemark && typeof depositRemark === "object" && depositRemark.alreadyCredited) {
+        const time = new Date(depositRemark.depositTime)
+          .toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+        const amt  = Number(depositRemark.depositAmt).toLocaleString("vi-VN");
+        logger.info("Deposit already credited, skip escalate", { username, amt, time });
+        return res.json({
+          ok:              true,
+          alreadyCredited: true,
+          message:         `✅ Đơn nạp ${amt} của bạn đã được ghi nhận lúc ${time}. Vui lòng kiểm tra số dư tài khoản.`,
+        });
+      }
+
       if (depositRemark) {
         orderCode = depositRemark;
         logger.info("BO browser deposit remark fetched", { username, orderCode });
@@ -142,15 +205,17 @@ app.post("/api/urgent-invoice", upload.single("image"), async (req, res) => {
       transferContent,
       orderCode,
       "Yêu cầu hối thúc hóa đơn từ khách",
-      "Chưa nhận được",
+      "-",
     ].join("\n");
 
     let tg;
+    const cskhReplyMarkup = telegramService.buildCskhKeyboard();
 
     if (image && image.buffer) {
       const form = new FormData();
       form.append("chat_id", chatId);
       form.append("caption", caption);
+      form.append("reply_markup", JSON.stringify(cskhReplyMarkup));
       form.append("photo", image.buffer, {
         filename:    image.originalname || "invoice.jpg",
         contentType: image.mimetype     || "image/jpeg",
@@ -163,7 +228,7 @@ app.post("/api/urgent-invoice", upload.single("image"), async (req, res) => {
     } else {
       tg = await axios.post(
         `https://api.telegram.org/bot${token}/sendMessage`,
-        { chat_id: chatId, text: caption },
+        { chat_id: chatId, text: caption, reply_markup: cskhReplyMarkup },
         { timeout: 15000 }
       );
     }
@@ -175,7 +240,7 @@ app.post("/api/urgent-invoice", upload.single("image"), async (req, res) => {
       fullname,
       ckCode:    transferContent,
       orderCode,
-      status:    "Chưa nhận được",
+      status:    "-",
       note:      "Yêu cầu hối thúc hóa đơn từ khách",
       fileId:    sentMsg.photo?.length ? sentMsg.photo[sentMsg.photo.length - 1].file_id : null,
     });
