@@ -142,25 +142,23 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
       ...(session.authToken ? { "Authorization": session.authToken } : {}),
     };
 
- logger.info("BO API search", { username, hasToken: !!session.authToken });
-
-    const res = await axios.get(`${BO_API_BASE}/deposits/search`, {
-      params: {
-        dateFrom, dateTo, starttime, endtime,
-        playerid:   username,
-        exactmatch: true,
-        statusType: "DEPOSIT_AUDIT",
-        zoneType:   process.env.AE_ZONE || "ASIA_HO_CHI_MINH",
-        timefilter: "deposittime",
-        sortcolumn: "deposittime",
-        sort:       "DESC",
-        limit:      100,
-        offset:     0,
-        language:   1,
-      },
-      headers,
-      timeout: 15_000,
-    });
+ const res = await axios.get(`${BO_API_BASE}/deposits/search`, {
+    params: {
+      dateFrom, dateTo, starttime, endtime,
+      playerid:   username,
+      exactmatch: true,   // BO dùng exactmatch cho cả DEPOSIT_RECORD và DEPOSIT_AUDIT
+      statusType,
+      zoneType:   process.env.ST666_ZONE || "ASIA_HO_CHI_MINH",
+      timefilter: "deposittime",
+      sortcolumn: "deposittime",
+      sort:       "DESC",
+      limit:      20,
+      offset:     0,
+      language:   1,
+    },
+    headers,
+    timeout: 15_000,
+  });
 
   const raw  = res.data;
   const list = Array.isArray(raw)        ? raw
