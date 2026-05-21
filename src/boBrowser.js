@@ -18,8 +18,8 @@ try {
   chromium = require("playwright").chromium;
 }
 
-const BO_LOGIN_URL = process.env.BO_LOGIN_URL   || "https://bo.bo666st.com/login";
-const BO_API_BASE  = process.env.BO_API_BASE || process.env.ST666_API_BASE || "https://boapi.bo666st.com/vh7prod-ims/api/v1";
+const BO_LOGIN_URL = process.env.BO_LOGIN_URL   || "https://bo.da77ae888.com/login";
+const BO_API_BASE  = process.env.BO_API_BASE || "https://boapi.da77ae888.com/ae888-ims/api/v1";
 const BO_USERNAME  = process.env.BO_USERNAME;
 const BO_PASSWORD  = process.env.BO_PASSWORD;
 
