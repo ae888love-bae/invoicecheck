@@ -18,8 +18,8 @@ try {
   chromium = require("playwright").chromium;
 }
 
-const BO_LOGIN_URL = process.env.AE_BO_LOGIN_URL || "https://bo.da77ae888.com/login";
-const BO_API_BASE  = process.env.AE_API_BASE     || "https://boapi.da77ae888.com/ae888-ims/api/v1";
+const BO_LOGIN_URL = process.env.AE_BO_LOGIN_URL   || "https://bo.da77ae888.com/login";
+const BO_API_BASE  = process.env.AE_API_BASE  || "https://boapi.da77ae888.com/ae888-ims/api/v1";
 const BO_USERNAME  = process.env.AE_BO_USER;
 const BO_PASSWORD  = process.env.AE_BO_PASS;
 
@@ -86,7 +86,7 @@ async function getSession() {
     logger.info("BO browser logged in", { url: page.url() });
 
     // Lấy cookies từ browser
-    const cookies     = await context.cookies();
+    const cookies      = await context.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");
 
     // Lấy token từ localStorage nếu không bắt được từ response
@@ -119,23 +119,19 @@ async function getSession() {
   }
 }
 
-// ── Gọi API trực tiếp với cookies từ browser session ─────────────────────────
-async function fetchDepositRemarkByUsername(username) {
-  if (!BO_USERNAME || !BO_PASSWORD) {
-    throw new Error("AE_BO_USER / AE_BO_PASS chưa được cấu hình");
-  }
-  if (!username) return null;
+// ── Helper: gọi deposits/search với statusType bất kỳ ────────────────────────
+async function searchByStatus(session, username, statusType, dayRange = 1) {
+  const now = Date.now();
 
-  try {
-    const session = await getSession();
+  // Dùng giờ VN (+07:00) để tính ngày — đúng với cách BO tính
+  const todayVN   = new Date(now + 7 * 3600_000).toISOString().slice(0, 10);
+  const startVN   = new Date(now - dayRange * 86_400_000 + 7 * 3600_000).toISOString().slice(0, 10);
+  const dateFrom  = startVN;
+  const dateTo    = todayVN;
+  const starttime = new Date(dateFrom + "T00:00:00+07:00").getTime();
+  const endtime   = new Date(dateTo   + "T23:59:59.999+07:00").getTime();
 
-    const now      = Date.now();
-    const dateFrom = new Date(now - 7 * 86_400_000).toISOString().split("T")[0];
-    const dateTo   = new Date(now + 86_400_000).toISOString().split("T")[0];
-    const starttime = new Date(dateFrom + "T00:00:00+07:00").getTime();
-    const endtime   = new Date(dateTo   + "T23:59:59.999+07:00").getTime();
-
-    const headers = {
+   const headers = {
       "Accept":          "*/*",
       "Accept-Language": "en-US,en;q=0.9",
       "Origin":          process.env.AE_ORIGIN  || "https://bo.da77ae888.com",
@@ -146,7 +142,7 @@ async function fetchDepositRemarkByUsername(username) {
       ...(session.authToken ? { "Authorization": session.authToken } : {}),
     };
 
-    logger.info("BO API search", { username, hasToken: !!session.authToken });
+ logger.info("BO API search", { username, hasToken: !!session.authToken });
 
     const res = await axios.get(`${BO_API_BASE}/deposits/search`, {
       params: {
@@ -166,14 +162,63 @@ async function fetchDepositRemarkByUsername(username) {
       timeout: 15_000,
     });
 
-    const raw  = res.data;
-    const list = Array.isArray(raw)        ? raw
-               : Array.isArray(raw?.data)  ? raw.data
-               : Array.isArray(raw?.list)  ? raw.list
-               : Array.isArray(raw?.items) ? raw.items
-               : [];
+  const raw  = res.data;
+  const list = Array.isArray(raw)        ? raw
+             : Array.isArray(raw?.data)  ? raw.data
+             : Array.isArray(raw?.list)  ? raw.list
+             : Array.isArray(raw?.items) ? raw.items
+             : [];
 
-    logger.info("BO API result", { username, count: list.length, firstRemarks: list[0]?.remarks });
+  logger.info("BO API result", { username, statusType, count: list.length });
+  return list;
+}
+
+// ── Gọi API trực tiếp với cookies từ browser session ─────────────────────────
+async function fetchDepositRemarkByUsername(username) {
+  if (!BO_USERNAME || !BO_PASSWORD) {
+    throw new Error("BO_USERNAME / BO_PASSWORD chưa được cấu hình");
+  }
+  if (!username) return null;
+
+  try {
+    const session = await getSession();
+
+    logger.info("BO API search", { username, hasToken: !!session.authToken });
+
+    // ── BƯỚC 1: Check đơn đã lên điểm chưa (DEPOSIT_RECORD trong 30 phút) ──
+    const credited = await searchByStatus(session, username, "DEPOSIT_RECORD", 1);
+    if (credited.length > 0) {
+      const latest     = credited[0]; // đã sort DESC
+      const depositTime = latest.deposittime || latest.depositTime || 0;
+      const minutesAgo  = Math.floor((Date.now() - depositTime) / 60000);
+
+      logger.info("BO DEPOSIT_RECORD check", {
+        username,
+        depositId:   latest?.depositid || null,
+        depositTime: depositTime,
+        minutesAgo,
+        threshold:   30,
+        willTrigger: minutesAgo < 30,
+      });
+
+      if (minutesAgo < 30) {
+        logger.info("BO deposit already credited", {
+          username,
+          depositId: latest?.depositid || null,
+          depositAmt: latest?.depositamt || latest?.inputdepositamt,
+          minutesAgo,
+        });
+
+        return {
+          alreadyCredited: true,
+          depositAmt:  latest?.depositamt || latest?.inputdepositamt || 0,
+          depositTime,
+        };
+      }
+    }
+
+    // ── BƯỚC 2: Tìm đơn đang chờ duyệt (DEPOSIT_AUDIT) — logic cũ ──
+    const list = await searchByStatus(session, username, "DEPOSIT_AUDIT", 7);
 
     if (list.length > 0 && list[0]?.remarks) return list[0].remarks;
 
