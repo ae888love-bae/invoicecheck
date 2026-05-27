@@ -543,7 +543,7 @@ const DEFAULT_NOTES = {
   "Đã lên điểm":    "Thanh toán đã cập nhật vào tài khoản, quý khách vui lòng kiểm tra số dư. Xin cảm ơn",
   "Chưa nhận được": "Thanh toán chưa nhận được, tiếp tục đối soát và kiểm tra đến khi có thông báo mới",
   "Lệnh sai số tiền":    "Số tiền không khớp với lệnh nạp, liên hệ CSKH để được hướng dẫn hỗ trợ thao tác mới",
-  "Sai ngân hàng/người nhận":  "Ngân hàng/người nhận trên hóa đơn không thuộc ST666, khách hàng cần kiểm tra lại thông tin hoặc liên hệ CSKH để được hỗ trợ",
+  "Sai ngân hàng/người nhận":  "Ngân hàng/người nhận trên hóa đơn không thuộc AE888, khách hàng cần kiểm tra lại thông tin hoặc liên hệ CSKH để được hỗ trợ",
 };
 
 async function handleT3Callback(cb) {
