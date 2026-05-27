@@ -1,6 +1,6 @@
 "use strict";
 /**
- * ST666 Internal API Client — Deposit Remark via deposits/search
+ * AE888 Internal API Client — Deposit Remark via deposits/search
  *
  * Endpoint thật:
  * GET /deposits/search
@@ -16,10 +16,10 @@ const axios  = require("axios");
 const crypto = require("crypto");
 const logger = require("./logger");
 
-const BASE    = process.env.ST666_API_BASE || "https://boapi.bo666st.com/vh7prod-ims/api/v1";
+const BASE    = process.env.AE888_API_BASE || "https://boapi.da77ae888.com/ae888-ims/api/v1";
 // Dùng chung env với boBrowser.js — không cần set riêng
-const BO_USER = process.env.ST666_BO_USER || process.env.BO_USERNAME;
-const BO_PASS = process.env.ST666_BO_PASS || process.env.ST666_BO_PASSWORD || process.env.BO_PASSWORD;
+const BO_USER = process.env.AE888_BO_USER || process.env.BO_USERNAME;
+const BO_PASS = process.env.AE888_BO_PASS || process.env.AE888_BO_PASSWORD || process.env.BO_PASSWORD;
 
 function sha1(str) {
   return crypto.createHash("sha1").update(str).digest("hex");
@@ -52,10 +52,10 @@ function buildHeaders(token) {
 
 async function login() {
   if (!BO_USER || !BO_PASS) {
-    throw new Error("ST666_BO_USER / ST666_BO_PASS chưa được cấu hình");
+    throw new Error("AE888_BO_USER / AE888_BO_PASS chưa được cấu hình");
   }
 
-  logger.info("ST666 login...");
+  logger.info("AE888 login...");
 
   const res = await axios.post(
     `${BASE}/login`,
@@ -85,7 +85,7 @@ async function login() {
   _token = token.startsWith("Bearer ") ? token : `Bearer ${token}`;
   _tokenExpiry = parseJwtExpiry(_token);
 
-  logger.info("ST666 login OK", {
+  logger.info("AE888 login OK", {
     user: BO_USER,
     expiry: new Date(_tokenExpiry).toISOString(),
   });
@@ -157,7 +157,7 @@ async function searchDepositsByStatus(username, statusType, dayRange = 1) {
 
   const list = normalizeList(res.data);
 
-  logger.info("ST666 deposits/search", {
+  logger.info("AE888 deposits/search", {
     username,
     statusType,
     dayRange,
@@ -165,7 +165,7 @@ async function searchDepositsByStatus(username, statusType, dayRange = 1) {
   });
 
   if (!list.length) {
-    logger.info("ST666 empty response sample", {
+    logger.info("AE888 empty response sample", {
       sample: JSON.stringify(res.data).slice(0, 800),
     });
   }
@@ -276,7 +276,7 @@ async function fetchPendingRemark(username) {
       const minutesAgo = Math.floor((Date.now() - depositTime) / 60000);
 
       if (minutesAgo < 30) {
-        logger.info("ST666 deposit already credited", {
+        logger.info("AE888 deposit already credited", {
           username,
           depositId: latest?.depositid || null,
           depositAmt: latest?.depositamt || latest?.inputdepositamt,
@@ -297,14 +297,14 @@ async function fetchPendingRemark(username) {
     if (!list.length) list = await searchDepositsByStatus(username, "DEPOSIT_AUDIT", 30);
 
     if (!list.length) {
-      logger.warn("ST666 no deposits found", { username });
+      logger.warn("AE888 no deposits found", { username });
       return null;
     }
 
     const latest = pickLatestDeposit(list);
     const remark = extractDepositRemark(latest);
 
-    logger.info("ST666 deposit selected", {
+    logger.info("AE888 deposit selected", {
       username,
       depositId: latest?.depositid || latest?.depositId || null,
       remark,
@@ -314,7 +314,7 @@ async function fetchPendingRemark(username) {
 
     return remark || null;
   } catch (err) {
-    logger.error("ST666 fetchPendingRemark error", {
+    logger.error("AE888 fetchPendingRemark error", {
       username,
       error: err.response?.data || err.message,
     });
@@ -343,7 +343,7 @@ async function lookupDeposit(username) {
   const key = username.toLowerCase().trim();
   const cached = _depositCache.get(key);
   if (cached && Date.now() < cached.expiry) {
-    logger.info("ST666 deposit cache hit", { username, status: cached.result.status });
+    logger.info("AE888 deposit cache hit", { username, status: cached.result.status });
     return cached.result;
   }
 
@@ -364,7 +364,7 @@ async function lookupDeposit(username) {
           minutesAgo,
           note: `Đã ghi nhận lúc ${new Date(depositTime).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}`,
         };
-        logger.info("ST666 lookup: credited", { username, minutesAgo });
+        logger.info("AE888 lookup: credited", { username, minutesAgo });
         _depositCache.set(key, { result, expiry: Date.now() + DEPOSIT_CACHE_TTL });
         return result;
       }
@@ -383,7 +383,7 @@ async function lookupDeposit(username) {
         depositAmt:  latest?.depositamt || latest?.inputdepositamt || 0,
         depositTime: getTime(latest),
       };
-      logger.info("ST666 lookup: pending", { username, remark });
+      logger.info("AE888 lookup: pending", { username, remark });
       _depositCache.set(key, { result, expiry: Date.now() + DEPOSIT_CACHE_TTL });
       return result;
     }
@@ -394,7 +394,7 @@ async function lookupDeposit(username) {
     return result;
 
   } catch (err) {
-    logger.error("ST666 lookupDeposit error", { username, error: err.message });
+    logger.error("AE888 lookupDeposit error", { username, error: err.message });
     return { status: 'notfound' };
   }
 }
