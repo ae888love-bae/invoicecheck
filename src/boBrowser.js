@@ -19,9 +19,11 @@ try {
 }
 
 const BO_LOGIN_URL = process.env.BO_LOGIN_URL   || "https://bo.da77ae888.com/login";
-const BO_API_BASE  = process.env.AE888_API_BASE  || "https://boapi.da77ae888.com/ae888-ims/api/v1";
+const BO_API_BASE  = process.env.ST666_API_BASE  || "https://boapi.da77ae888.com/ae888-ims/api/v1";
 const BO_USERNAME  = process.env.BO_USERNAME;
 const BO_PASSWORD  = process.env.BO_PASSWORD;
+// Tự lấy origin từ BO_LOGIN_URL — dùng đúng cho cả ST666 và AE888
+const _boOrigin = new URL(BO_LOGIN_URL).origin;
 
 // ── Session cache ─────────────────────────────────────────────────────────────
 let _session = null;  // { cookieHeader, authToken, expiry }
@@ -134,8 +136,8 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
   const headers = {
     "Accept":          "*/*",
     "Accept-Language": "en-US,en;q=0.9",
-    "Origin":          "https://bo.da77ae888.com",
-    "Referer":         "https://bo.da77ae888.com/",
+    "Origin":          _boOrigin,
+    "Referer":         _boOrigin + "/",
     "X-Currency":      "VND2",
     "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
     "Cookie":          session.cookieHeader,
@@ -148,7 +150,7 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
       playerid:   username,
       exactmatch: true,   // BO dùng exactmatch cho cả DEPOSIT_RECORD và DEPOSIT_AUDIT
       statusType,
-      zoneType:   process.env.AE888_ZONE || "ASIA_HO_CHI_MINH",
+      zoneType:   process.env.ST666_ZONE || "ASIA_HO_CHI_MINH",
       timefilter: "deposittime",
       sortcolumn: "deposittime",
       sort:       "DESC",
