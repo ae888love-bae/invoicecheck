@@ -64,7 +64,7 @@ async function getSession() {
 
     page = await context.newPage();
     await page.goto(BO_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 45_000 });
-    await page.waitForTimeout(3_000);
+    await page.waitForTimeout(_000);
 
     // Login
     const userSel = await Promise.race([
