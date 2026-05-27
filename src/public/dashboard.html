@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>AE888 · Analytics Dashboard</title>
+<title>ST666 · Analytics Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -141,7 +141,7 @@ tbody tr:hover td{background:#fafafa}
 
 <div id="lock">
   <div class="lock-wrap">
-    <div style="text-align:center;margin-bottom:16px"><img src="https://i.postimg.cc/XJg068Tk/logo-moi-01.png" alt="AE888" style="height:50px;object-fit:contain" onerror="this.style.display='none'"></div>
+    <div style="text-align:center;margin-bottom:16px"><img src="https://i.postimg.cc/MKYXvzvw/ST-(1).png" alt="ST666" style="height:50px;object-fit:contain" onerror="this.style.display='none'"></div>
     <div class="lock-tagline">Invoice Middleware &middot; Admin Panel</div>
     <div class="lock-card">
       <h2>Đăng nhập quản trị</h2>
@@ -158,7 +158,7 @@ tbody tr:hover td{background:#fafafa}
   <div class="layout">
     <aside class="sidebar">
       <div class="sb-logo">
-        <img src="https://i.postimg.cc/XJg068Tk/logo-moi-01.png" alt="AE888" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <img src="https://i.postimg.cc/MKYXvzvw/ST-(1).png" alt="ST666" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
         <div class="sb-logo-sub">Analytics Dashboard</div>
       </div>
       <nav class="sb-nav">
@@ -283,8 +283,8 @@ function showPage(id,el){
   document.getElementById('page-title').textContent=PT[id]||id;
 }
 
-var ICONS=['📦','✅','✅','⏳','❌','⚠️','🏦'];
-var IBGS=['#fef3c7','#dcfce7','#d1fae5','#f0f0f8','#fee2e2','#ede9fe','#dbeafe'];
+var ICONS=['📦','✅','✅','⏳','❌','⚠️','🏦','🚫'];
+var IBGS=['#fef3c7','#dcfce7','#d1fae5','#f0f0f8','#fee2e2','#ede9fe','#dbeafe','#fff1f2'];
 function renderCards(c){
   var sc=c.byStatus||{};
   var im=c.invoices||[];
@@ -297,6 +297,7 @@ function renderCards(c){
     {l:'Chưa nhận được',v:sc['Chưa nhận được']||0,s:'cần tra soát'},
     {l:'Lệnh sai số tiền',v:sc['Lệnh sai số tiền']||0,s:'sai số tiền'},
     {l:'Sai ngân hàng',v:sc['Sai ngân hàng/người nhận']||0,s:'sai NH/người nhận'},
+    {l:'Lỗi thanh toán',v:sc['Lỗi thanh toán']||0,s:'lỗi thanh toán'},
   ];
   document.getElementById('stat-cards').innerHTML=cards.map(function(c,i){
     return '<div class="scard"><div class="scard-icon" style="background:'+IBGS[i]+'">'+ICONS[i]+'</div>'+
@@ -409,7 +410,7 @@ function exportCSV(){
   });
   var blob=new Blob(['\uFEFF'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
   var a=document.createElement('a');a.href=URL.createObjectURL(blob);
-  a.download='ae888_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  a.download='st666_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
 function q(s){return '"'+(s||'').replace(/"/g,"'")+'"';}
 
