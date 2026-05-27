@@ -10,7 +10,7 @@ const rateLimit = require("express-rate-limit");
 const multer   = require("multer");
 const { searchInvoiceByAll, telegramService, addRuntimeStatus, getDebugCache, getInvoiceStats, addManualInvoice } = require("./telegram");
 const { fetchDepositRemarkByUsername } = require("./boBrowser");
-const { lookupDeposit, invalidateDepositCache } = require("./st666api");
+const { lookupDeposit, invalidateDepositCache } = require("./ae888api");
 const logger = require("./logger");
 
 // ── Multer ────────────────────────────────────────────────────────────────────
