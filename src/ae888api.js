@@ -37,8 +37,8 @@ function buildHeaders(token) {
   return {
     "Accept":          "*/*",
     "Accept-Language": "en-US,en;q=0.9",
-    "Origin":          "https://bo.bo666st.com",
-    "Referer":         "https://bo.bo666st.com/",
+    "Origin":          "https://bo.da77ae888.com/",
+    "Referer":         "https://bo.da77ae888.com/",
     "X-Currency":      "VND2",
     "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     ...(token ? { "Authorization": token } : {}),
