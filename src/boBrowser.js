@@ -24,11 +24,11 @@ const BO_USERNAME  = process.env.BO_USERNAME;
 const BO_PASSWORD  = process.env.BO_PASSWORD;
 // Threshold chung — đồng bộ với st666api.js
 const CREDITED_THRESHOLD_MS = 30 * 60 * 1000;
-
+ 
 // ── Session cache + MUTEX ─────────────────────────────────────────────────────
 let _session      = null;
 let _loginPromise = null;
-
+ 
 async function getSession() {
   if (_session && Date.now() < _session.expiry) return _session;
   if (_loginPromise) {
@@ -38,15 +38,15 @@ async function getSession() {
   _loginPromise = _doLogin().finally(() => { _loginPromise = null; });
   return _loginPromise;
 }
-
+ 
 async function _doLogin() {
   logger.info("BO browser login for session...");
-
+ 
   const browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
-
+ 
   let page;
   try {
     const context = await browser.newContext({
@@ -55,7 +55,7 @@ async function _doLogin() {
       locale:     "en-US",
       timezoneId: "Asia/Ho_Chi_Minh",
     });
-
+ 
     let authToken = null;
     context.on("response", async (resp) => {
       try {
@@ -70,39 +70,39 @@ async function _doLogin() {
         }
       } catch {}
     });
-
+ 
     page = await context.newPage();
     await page.goto(BO_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await page.waitForTimeout(2_000);
-
+ 
     const userSel = await Promise.race([
       page.waitForSelector("#userid",                        { state: "visible", timeout: 30_000 }),
       page.waitForSelector('[data-testid="login-userid"]',   { state: "visible", timeout: 30_000 }),
       page.waitForSelector('input[placeholder="User Name"]', { state: "visible", timeout: 30_000 }),
     ]).catch(() => null);
-
+ 
     if (!userSel) {
       await page.screenshot({ path: "/tmp/bo-no-input.png" }).catch(() => {});
       throw new Error("Không tìm thấy ô login username");
     }
-
+ 
     await userSel.fill(BO_USERNAME);
     await page.fill("#password", BO_PASSWORD).catch(() =>
       page.fill('[data-testid="login-password"]', BO_PASSWORD)
     );
     await page.waitForTimeout(500);
-
+ 
     // Button DOM: <button class="nrc-button" type="button">Login</button>
     // type="button" — React SPA, KHÔNG trigger browser navigation
     // → dùng waitUntil:"commit" thay vì "load"
     await page.click("button.nrc-button");
-
+ 
     const result = await Promise.race([
       page.waitForURL(
         url => !url.toString().includes("/login"),
         { timeout: 60_000, waitUntil: "commit" }
       ).then(() => "success"),
-
+ 
       page.waitForFunction(
         () => {
           const el = document.querySelector("h5.errormsg");
@@ -114,25 +114,25 @@ async function _doLogin() {
       logger.warn("BO waitForURL + errormsg both timed out", { error: err.message });
       return "timeout";
     });
-
+ 
     await page.screenshot({ path: "/tmp/bo-after-login.png" }).catch(() => {});
-
+ 
     if (result === "error") {
       const errText = await page
         .$eval("h5.errormsg", el => el.textContent?.trim())
         .catch(() => "unknown error");
       throw new Error(`BO login thất bại: "${errText}"`);
     }
-
+ 
     if (result === "timeout" || page.url().includes("/login")) {
       throw new Error(`BO login timeout — vẫn ở /login sau 60s (url: ${page.url()})`);
     }
-
+ 
     logger.info("BO browser logged in", { url: page.url() });
-
+ 
     const cookies      = await context.cookies();
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");
-
+ 
     if (!authToken) {
       authToken = await page.evaluate(() =>
         localStorage.getItem("token")        ||
@@ -142,9 +142,9 @@ async function _doLogin() {
         null
       ).catch(() => null);
     }
-
+ 
     logger.info("BO session obtained", { cookieCount: cookies.length, hasToken: !!authToken });
-
+ 
     _session = {
       cookieHeader,
       authToken: authToken
@@ -152,9 +152,9 @@ async function _doLogin() {
         : null,
       expiry: Date.now() + 20 * 60 * 1000,
     };
-
+ 
     return _session;
-
+ 
   } catch (err) {
     const isAuthFailure = err.message?.includes("BO login thất bại");
     if (isAuthFailure) {
@@ -164,13 +164,13 @@ async function _doLogin() {
       logger.warn("BO login network/timeout error — giữ session cũ nếu còn hạn", { error: err.message });
     }
     throw err;
-
+ 
   } finally {
     await page?.close().catch(() => {});
     await browser.close().catch(() => {});
   }
 }
-
+ 
 // ── Helper: gọi deposits/search ───────────────────────────────────────────────
 async function searchByStatus(session, username, statusType, dayRange = 1) {
   const now       = Date.now();
@@ -180,7 +180,7 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
   const dateTo    = todayVN;
   const starttime = new Date(dateFrom + "T00:00:00+07:00").getTime();
   const endtime   = new Date(dateTo   + "T23:59:59.999+07:00").getTime();
-
+ 
   const headers = {
     "Accept":          "*/*",
     "Accept-Language": "en-US,en;q=0.9",
@@ -191,7 +191,7 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
     "Cookie":          session.cookieHeader,
     ...(session.authToken ? { "Authorization": session.authToken } : {}),
   };
-
+ 
   const res = await axios.get(`${BO_API_BASE}/deposits/search`, {
     params: {
       dateFrom, dateTo, starttime, endtime,
@@ -209,36 +209,36 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
     headers,
     timeout: 15_000,
   });
-
+ 
   const raw  = res.data;
   const list = Array.isArray(raw)        ? raw
              : Array.isArray(raw?.data)  ? raw.data
              : Array.isArray(raw?.list)  ? raw.list
              : Array.isArray(raw?.items) ? raw.items
              : [];
-
+ 
   logger.info("BO API result", { username, statusType, count: list.length });
   return list;
 }
-
+ 
 // ── Public ────────────────────────────────────────────────────────────────────
 async function fetchDepositRemarkByUsername(username) {
   if (!BO_USERNAME || !BO_PASSWORD) throw new Error("BO_USERNAME / BO_PASSWORD chưa được cấu hình");
   if (!username) return null;
-
+ 
   try {
     const session = await getSession();
     logger.info("BO API search", { username, hasToken: !!session.authToken });
-
+ 
     // BƯỚC 1: đã lên điểm chưa?
     const credited = await searchByStatus(session, username, "DEPOSIT_RECORD", 1);
     if (credited.length > 0) {
       const latest      = credited[0];
       const depositTime = latest.deposittime || latest.depositTime || 0;
       const minutesAgo  = Math.floor((Date.now() - depositTime) / 60000);
-
+ 
       logger.info("BO DEPOSIT_RECORD check", { username, depositId: latest?.depositid || null, minutesAgo });
-
+ 
       if (Date.now() - depositTime < CREDITED_THRESHOLD_MS) {
         logger.info("BO deposit already credited", { username, depositAmt: latest?.depositamt, minutesAgo });
         return {
@@ -248,14 +248,14 @@ async function fetchDepositRemarkByUsername(username) {
         };
       }
     }
-
+ 
     // BƯỚC 2: đang chờ duyệt
     const list = await searchByStatus(session, username, "DEPOSIT_AUDIT", 7);
     if (list.length > 0 && list[0]?.remarks) return list[0].remarks;
-
+ 
     logger.warn("BO deposit remark not found", { username });
     return null;
-
+ 
   } catch (err) {
     logger.error("BO fetchDepositRemark failed", {
       username,
@@ -268,5 +268,5 @@ async function fetchDepositRemarkByUsername(username) {
     return null;
   }
 }
-
-module.exports = { fetchDepositRemarkByUsername };
+ 
+module.exports = { fetchDepositRemarkByUsername, getSession };
