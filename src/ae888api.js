@@ -1,16 +1,17 @@
 "use strict";
 /**
- * AE888 Internal API Client — Deposit Remark via deposits/search
+ * ST666 Internal API Client — Deposit Remark via deposits/search
+ *
+ * Auth: dùng chung session từ boBrowser.js
+ * → KHÔNG tự login riêng, tránh duplicate session gây khóa tài khoản BO.
  */
-
-const axios  = require("axios");
-const crypto = require("crypto");
-const logger = require("./logger");
-
-const BASE    = process.env.AE888_API_BASE || "https://boapi.da77ae888.com/ae888-ims/api/v1";
-const BO_USER = process.env.ST666_BO_USER  || process.env.BO_USERNAME;
-const BO_PASS = process.env.ST666_BO_PASS  || process.env.ST666_BO_PASSWORD || process.env.BO_PASSWORD;
-
+ 
+const axios      = require("axios");
+const logger     = require("./logger");
+const { getSession } = require("./boBrowser"); // ← dùng chung, không login 2 lần
+ 
+const BASE = process.env.AE888_API_BASE || "https://boapi.da77ae888.com/ae888-ims/api/v1";
+ 
 // Threshold chung — đồng bộ với boBrowser.js
 const CREDITED_THRESHOLD_MS = 30 * 60 * 1000;
 
