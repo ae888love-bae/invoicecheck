@@ -73,7 +73,7 @@ async function getSession() {
       page.waitForSelector('input[placeholder="User Name"]',{ state: "visible", timeout: 45_000 }),
     ]).catch(() => null);
 
-    if (!userSel) throw new Error("Không tìm thấy ô login sau 30s");
+    if (!userSel) throw new Error("Không tìm thấy ô login sau 45s");
 
     await userSel.fill(BO_USERNAME);
     await page.fill("#password", BO_PASSWORD).catch(() =>
@@ -197,8 +197,8 @@ async function fetchDepositRemarkByUsername(username) {
         depositId:   latest?.depositid || null,
         depositTime: depositTime,
         minutesAgo,
-        threshold:   30,
-        willTrigger: minutesAgo < 30,
+        threshold:   45,
+        willTrigger: minutesAgo < 45,
       });
 
       if (minutesAgo < 30) {
