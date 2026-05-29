@@ -265,9 +265,18 @@ async function fetchDepositRemarkByUsername(username) {
       data:   JSON.stringify(err.response?.data || {}).slice(0, 200),
     });
     const isAuthFailure = err.message?.includes("BO login thất bại");
-    if (isAuthFailure) _session = null;
+    const is401 = err.response?.status === 401;
+    if (isAuthFailure || is401) {
+      logger.warn("BO session reset due to auth failure/401", { is401, isAuthFailure });
+      _session = null;
+    }
     return null;
   }
 }
 
-module.exports = { fetchDepositRemarkByUsername, getSession };
+function invalidateSession() {
+  _session = null;
+  logger.info("BO session invalidated (forced re-login on next call)");
+}
+
+module.exports = { fetchDepositRemarkByUsername, getSession, invalidateSession };
