@@ -8,12 +8,12 @@
 
 const axios      = require("axios");
 const logger     = require("./logger");
-const { getSession, invalidateSession } = require("./boBrowser"); // ← dùng chung, không login 2 lần
+const { getSession } = require("./boBrowser"); // ← dùng chung, không login 2 lần
 
 const BASE = process.env.AE888_API_BASE || "https://boapi.da77ae888.com/ae888-ims/api/v1";
 
 // Threshold chung — đồng bộ với boBrowser.js
-const CREDITED_THRESHOLD_MS = 120 * 60 * 1000; // 120 phút
+const CREDITED_THRESHOLD_MS = 30 * 60 * 1000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function buildHeaders(session) {
@@ -97,13 +97,11 @@ function extractDepositRemark(deposit) {
 }
 
 // ── Core search ───────────────────────────────────────────────────────────────
-async function searchDepositsByStatus(username, statusType, dayRange = 1, _retry = false) {
+async function searchDepositsByStatus(username, statusType, dayRange = 1) {
   const session = await getSession(); // dùng chung session với boBrowser.js
   const { dateFrom, dateTo, starttime, endtime } = getDateParts(dayRange);
 
-  let res;
-  try {
-  res = await axios.get(`${BASE}/deposits/search`, {
+  const res = await axios.get(`${BASE}/deposits/search`, {
     params: {
       dateFrom, dateTo, starttime, endtime,
       exactmatch: true,
@@ -120,15 +118,6 @@ async function searchDepositsByStatus(username, statusType, dayRange = 1, _retry
     headers: buildHeaders(session),
     timeout: 15000,
   });
-
-  } catch (err) {
-    if (err.response?.status === 401 && !_retry) {
-      logger.warn("AE888 401 — invalidating session, retrying once", { username, statusType });
-      invalidateSession();
-      return searchDepositsByStatus(username, statusType, dayRange, true);
-    }
-    throw err;
-  }
 
   const list = normalizeList(res.data);
   logger.info("AE888 deposits/search", { username, statusType, dayRange, results: list.length });
