@@ -24,7 +24,7 @@ const BO_USERNAME  = process.env.BO_USERNAME;
 const BO_PASSWORD  = process.env.BO_PASSWORD;
 
 // Threshold chung — đồng bộ với st666api.js
-const CREDITED_THRESHOLD_MS = 30 * 60 * 1000;
+const CREDITED_THRESHOLD_MS = 120 * 60 * 1000; // 120 phút
 
 // ── Session cache + MUTEX ─────────────────────────────────────────────────────
 let _session      = null;
