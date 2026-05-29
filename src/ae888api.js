@@ -13,7 +13,7 @@ const { getSession } = require("./boBrowser"); // ← dùng chung, không login 
 const BASE = process.env.AE888_API_BASE || "https://boapi.da77ae888.com/ae888-ims/api/v1";
 
 // Threshold chung — đồng bộ với boBrowser.js
-const CREDITED_THRESHOLD_MS = 30 * 60 * 1000;
+const CREDITED_THRESHOLD_MS = 120 * 60 * 1000; // 120 phút
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function buildHeaders(session) {
