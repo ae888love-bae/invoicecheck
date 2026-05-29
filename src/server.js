@@ -107,10 +107,13 @@ app.get("/my-ip", async (_req, res) => {
 });
 
 // ── Webhook Telegram ──────────────────────────────────────────────────────────
-app.post("/webhook/telegram", async (req, res) => {
-  try { await telegramService.processUpdate(req.body); }
-  catch (e) { logger.error("TG error", { error: e.message }); }
+app.post("/webhook/telegram", (req, res) => {
+  // Trả 200 ngay — Telegram yêu cầu response trong 5s, xử lý ở background
   res.json({ ok: true });
+  setImmediate(async () => {
+    try { await telegramService.processUpdate(req.body); }
+    catch (e) { logger.error("TG error", { error: e.message }); }
+  });
 });
 
 // ── Public API — Web tool tra cứu ────────────────────────────────────────────
@@ -290,10 +293,11 @@ app.post("/api/urgent-invoice", upload.single("image"), async (req, res) => {
         }
       }
 
-      // orderCode bắt buộc — không có thì KHÔNG gửi TG thiếu data
+      // BO đã được tra đầy đủ (API + Playwright) — nếu vẫn không có remark
+      // thì gửi TG với "-", không abort (đơn vẫn cần escalate lên nhóm)
       if (!orderCode) {
-        logger.error("Urgent invoice aborted: orderCode not found", { username, transferContent });
-        return;
+        logger.warn("Urgent invoice: orderCode not found, sending with placeholder", { username, transferContent });
+        orderCode = "-";
       }
 
       // ── Bước 3: Gửi Telegram với orderCode đầy đủ ────────────────────────
