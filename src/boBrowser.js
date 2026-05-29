@@ -223,12 +223,11 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
 }
 
 // ── Helper: kiểm tra đơn bị huỷ/cancel ──────────────────────────────────────
-// Status codes từ BO (số nguyên):
-//   5 = Cancel   ← xác nhận từ raw log
-//   3 = Reject   (common trong các hệ BO tương tự)
-//   6 = Expired  (common)
-// Chỉ filter các status đã biết chắc là KHÔNG lên điểm
-const CANCELLED_STATUS_CODES = new Set([3, 5, 6]);
+// Status codes từ BO (số nguyên) — chỉ thêm khi đã XÁC NHẬN từ raw log:
+//   3 = Approved  ← ĐÃ LÊN ĐIỂM, KHÔNG filter
+//   5 = Cancel    ← xác nhận từ raw log
+// KHÔNG đoán mò — chưa xác nhận thì không thêm vào
+const CANCELLED_STATUS_CODES = new Set([5]);
 
 function isCancelledDeposit(d) {
   // Status là số (trường hợp thực tế của BO này)
@@ -249,34 +248,8 @@ async function fetchDepositRemarkByUsername(username) {
     const session = await getSession();
     logger.info("BO API search", { username, hasToken: !!session.authToken });
 
-    // BƯỚC 1: đã lên điểm chưa? — lọc bỏ đơn Cancel/Reject
-    const creditedRaw = await searchByStatus(session, username, "DEPOSIT_RECORD", 1);
-    const credited    = creditedRaw.filter(d => !isCancelledDeposit(d));
-    const cancelledCount = creditedRaw.length - credited.length;
-    if (cancelledCount > 0) {
-      logger.info("BO DEPOSIT_RECORD has cancelled entries, falling back to DEPOSIT_AUDIT", {
-        username, cancelledCount,
-        cancelledStatuses: creditedRaw.filter(isCancelledDeposit).map(d => d.status),
-      });
-    }
-    if (credited.length > 0) {
-      const latest      = credited[0];
-      const depositTime = latest.deposittime || latest.depositTime || 0;
-      const minutesAgo  = Math.floor((Date.now() - depositTime) / 60000);
-
-      logger.info("BO DEPOSIT_RECORD check", { username, depositId: latest?.depositid || null, minutesAgo });
-
-      if (Date.now() - depositTime < CREDITED_THRESHOLD_MS) {
-        logger.info("BO deposit already credited", { username, depositAmt: latest?.depositamt, minutesAgo });
-        return {
-          alreadyCredited: true,
-          depositAmt:  latest?.depositamt || latest?.inputdepositamt || 0,
-          depositTime,
-        };
-      }
-    }
-
-    // BƯỚC 2: đang chờ duyệt
+    // DEPOSIT_RECORD đã được lookupDeposit() (ae888api/st666api) check trước rồi.
+    // boBrowser chỉ lấy remarks từ DEPOSIT_AUDIT — không gọi BO 2 lần.
     const list = await searchByStatus(session, username, "DEPOSIT_AUDIT", 7);
     if (list.length > 0 && list[0]?.remarks) return list[0].remarks;
 
