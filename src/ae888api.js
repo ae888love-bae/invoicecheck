@@ -99,10 +99,8 @@ function extractDepositRemark(deposit) {
 // ── Helper: kiểm tra đơn bị huỷ/cancel ──────────────────────────────────────
 // Status codes từ BO (số nguyên):
 //   5 = Cancel   ← xác nhận từ raw log
-//   3 = Reject   (common trong các hệ BO tương tự)
-//   6 = Expired  (common)
 // Chỉ filter các status đã biết chắc là KHÔNG lên điểm
-const CANCELLED_STATUS_CODES = new Set([3, 5, 6]);
+const CANCELLED_STATUS_CODES = new Set([5]);
 
 function isCancelledDeposit(d) {
   // Status là số (trường hợp thực tế của BO này)
@@ -111,7 +109,7 @@ function isCancelledDeposit(d) {
   }
   // Fallback: status là string (phòng trường hợp API đổi format)
   const s = (d.status || d.depositstatus || d.statusname || "").toString().toLowerCase().trim();
-  return ["cancel", "cancelled", "reject", "rejected", "failed", "fail", "void", "refund"].includes(s);
+  return ["cancel", "cancelled"].includes(s);
 }
 
 // ── Core search ───────────────────────────────────────────────────────────────
