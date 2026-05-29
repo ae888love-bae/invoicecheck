@@ -222,6 +222,24 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
   return list;
 }
 
+// ── Helper: kiểm tra đơn bị huỷ/cancel ──────────────────────────────────────
+// Status codes từ BO (số nguyên):
+//   5 = Cancel   ← xác nhận từ raw log
+//   3 = Reject   (common trong các hệ BO tương tự)
+//   6 = Expired  (common)
+// Chỉ filter các status đã biết chắc là KHÔNG lên điểm
+const CANCELLED_STATUS_CODES = new Set([3, 5, 6]);
+
+function isCancelledDeposit(d) {
+  // Status là số (trường hợp thực tế của BO này)
+  if (typeof d.status === "number") {
+    return CANCELLED_STATUS_CODES.has(d.status);
+  }
+  // Fallback: status là string (phòng trường hợp API đổi format)
+  const s = (d.status || d.depositstatus || d.statusname || "").toString().toLowerCase().trim();
+  return ["cancel", "cancelled", "reject", "rejected", "failed", "fail", "void", "refund"].includes(s);
+}
+
 // ── Public ────────────────────────────────────────────────────────────────────
 async function fetchDepositRemarkByUsername(username) {
   if (!BO_USERNAME || !BO_PASSWORD) throw new Error("BO_USERNAME / BO_PASSWORD chưa được cấu hình");
@@ -231,8 +249,16 @@ async function fetchDepositRemarkByUsername(username) {
     const session = await getSession();
     logger.info("BO API search", { username, hasToken: !!session.authToken });
 
-    // BƯỚC 1: đã lên điểm chưa?
-    const credited = await searchByStatus(session, username, "DEPOSIT_RECORD", 1);
+    // BƯỚC 1: đã lên điểm chưa? — lọc bỏ đơn Cancel/Reject
+    const creditedRaw = await searchByStatus(session, username, "DEPOSIT_RECORD", 1);
+    const credited    = creditedRaw.filter(d => !isCancelledDeposit(d));
+    const cancelledCount = creditedRaw.length - credited.length;
+    if (cancelledCount > 0) {
+      logger.info("BO DEPOSIT_RECORD has cancelled entries, falling back to DEPOSIT_AUDIT", {
+        username, cancelledCount,
+        cancelledStatuses: creditedRaw.filter(isCancelledDeposit).map(d => d.status),
+      });
+    }
     if (credited.length > 0) {
       const latest      = credited[0];
       const depositTime = latest.deposittime || latest.depositTime || 0;
