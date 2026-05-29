@@ -97,11 +97,20 @@ function extractDepositRemark(deposit) {
 }
 
 // ── Helper: kiểm tra đơn bị huỷ/cancel ──────────────────────────────────────
+// Status codes từ BO (số nguyên):
+//   5 = Cancel   ← xác nhận từ raw log
+//   3 = Reject   (common trong các hệ BO tương tự)
+//   6 = Expired  (common)
+// Chỉ filter các status đã biết chắc là KHÔNG lên điểm
+const CANCELLED_STATUS_CODES = new Set([3, 5, 6]);
+
 function isCancelledDeposit(d) {
-  const s = (
-    d.status        || d.depositstatus  || d.statusname ||
-    d.statusType    || d.depositStatus  || d.txstatus   || ""
-  ).toString().toLowerCase().trim();
+  // Status là số (trường hợp thực tế của BO này)
+  if (typeof d.status === "number") {
+    return CANCELLED_STATUS_CODES.has(d.status);
+  }
+  // Fallback: status là string (phòng trường hợp API đổi format)
+  const s = (d.status || d.depositstatus || d.statusname || "").toString().toLowerCase().trim();
   return ["cancel", "cancelled", "reject", "rejected", "failed", "fail", "void", "refund"].includes(s);
 }
 
@@ -240,6 +249,13 @@ async function lookupDeposit(username) {
       });
     }
     const credited    = creditedRaw.filter(d => !isCancelledDeposit(d));
+    const cancelledCount = creditedRaw.length - credited.length;
+    if (cancelledCount > 0) {
+      logger.info("AE888 DEPOSIT_RECORD has cancelled entries, falling back to DEPOSIT_AUDIT", {
+        username, cancelledCount,
+        cancelledStatuses: creditedRaw.filter(isCancelledDeposit).map(d => d.status),
+      });
+    }
     if (credited.length > 0) {
       const latest      = pickLatestDeposit(credited);
       const depositTime = getTime(latest);
