@@ -8,12 +8,12 @@
 
 const axios      = require("axios");
 const logger     = require("./logger");
-const { getSession } = require("./boBrowser"); // ← dùng chung, không login 2 lần
+const { getSession, invalidateSession } = require("./boBrowser"); // ← dùng chung, không login 2 lần
 
 const BASE = process.env.AE888_API_BASE || "https://boapi.da77ae888.com/ae888-ims/api/v1";
 
 // Threshold chung — đồng bộ với boBrowser.js
-const CREDITED_THRESHOLD_MS = 30 * 60 * 1000;
+const CREDITED_THRESHOLD_MS = 120 * 60 * 1000; // 120 phút
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function buildHeaders(session) {
@@ -96,12 +96,23 @@ function extractDepositRemark(deposit) {
       || findRemarkDeep(deposit) || null;
 }
 
+// ── Helper: kiểm tra đơn bị huỷ/cancel ──────────────────────────────────────
+function isCancelledDeposit(d) {
+  const s = (
+    d.status        || d.depositstatus  || d.statusname ||
+    d.statusType    || d.depositStatus  || d.txstatus   || ""
+  ).toString().toLowerCase().trim();
+  return ["cancel", "cancelled", "reject", "rejected", "failed", "fail", "void", "refund"].includes(s);
+}
+
 // ── Core search ───────────────────────────────────────────────────────────────
-async function searchDepositsByStatus(username, statusType, dayRange = 1) {
+async function searchDepositsByStatus(username, statusType, dayRange = 1, _retry = false) {
   const session = await getSession(); // dùng chung session với boBrowser.js
   const { dateFrom, dateTo, starttime, endtime } = getDateParts(dayRange);
 
-  const res = await axios.get(`${BASE}/deposits/search`, {
+  let res;
+  try {
+  res = await axios.get(`${BASE}/deposits/search`, {
     params: {
       dateFrom, dateTo, starttime, endtime,
       exactmatch: true,
@@ -118,6 +129,15 @@ async function searchDepositsByStatus(username, statusType, dayRange = 1) {
     headers: buildHeaders(session),
     timeout: 15000,
   });
+
+  } catch (err) {
+    if (err.response?.status === 401 && !_retry) {
+      logger.warn("AE888 401 — invalidating session, retrying once", { username, statusType });
+      invalidateSession();
+      return searchDepositsByStatus(username, statusType, dayRange, true);
+    }
+    throw err;
+  }
 
   const list = normalizeList(res.data);
   logger.info("AE888 deposits/search", { username, statusType, dayRange, results: list.length });
@@ -151,8 +171,9 @@ async function fetchPendingRemark(username) {
   if (!username) return null;
 
   try {
-    // BƯỚC 1: đã lên điểm chưa?
-    const credited = await searchDepositsByStatus(username, "DEPOSIT_RECORD", 1);
+    // BƯỚC 1: đã lên điểm chưa? — lọc bỏ đơn Cancel/Reject
+    const creditedRaw = await searchDepositsByStatus(username, "DEPOSIT_RECORD", 1);
+    const credited    = creditedRaw.filter(d => !isCancelledDeposit(d));
     if (credited.length > 0) {
       const latest      = pickLatestDeposit(credited);
       const depositTime = getTime(latest);
@@ -209,8 +230,16 @@ async function lookupDeposit(username) {
 
   let result;
   try {
-    // BƯỚC 1: đã lên điểm?
-    const credited = await searchDepositsByStatus(username, "DEPOSIT_RECORD", 1);
+    // BƯỚC 1: đã lên điểm? — lọc bỏ đơn Cancel/Reject
+    const creditedRaw = await searchDepositsByStatus(username, "DEPOSIT_RECORD", 1);
+    if (creditedRaw.length > 0) {
+      // LOG TẠM — xem tên field status trong DEPOSIT_RECORD response
+      logger.info("AE888 DEPOSIT_RECORD raw sample", {
+        username,
+        sample: JSON.stringify(creditedRaw[0]).slice(0, 1000),
+      });
+    }
+    const credited    = creditedRaw.filter(d => !isCancelledDeposit(d));
     if (credited.length > 0) {
       const latest      = pickLatestDeposit(credited);
       const depositTime = getTime(latest);
