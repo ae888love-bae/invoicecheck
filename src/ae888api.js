@@ -8,11 +8,10 @@
 
 const axios      = require("axios");
 const logger     = require("./logger");
-const { getSession, invalidateSession } = require("./boBrowser"); // ← dùng chung, không login 2 lần
+const { getSession, invalidateSession } = require("./boBrowser");
 
 const BASE = process.env.AE888_API_BASE || "https://boapi.da77ae888.com/ae888-ims/api/v1";
 
-// Threshold chung — đồng bộ với boBrowser.js
 const CREDITED_THRESHOLD_MS = 120 * 60 * 1000; // 120 phút
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -96,47 +95,40 @@ function extractDepositRemark(deposit) {
       || findRemarkDeep(deposit) || null;
 }
 
-// ── Helper: kiểm tra đơn bị huỷ/cancel ──────────────────────────────────────
-// Status codes từ BO (số nguyên):
-//   5 = Cancel   ← xác nhận từ raw log
-// Chỉ filter các status đã biết chắc là KHÔNG lên điểm
 const CANCELLED_STATUS_CODES = new Set([5]);
 
 function isCancelledDeposit(d) {
-  // Status là số (trường hợp thực tế của BO này)
   if (typeof d.status === "number") {
     return CANCELLED_STATUS_CODES.has(d.status);
   }
-  // Fallback: status là string (phòng trường hợp API đổi format)
   const s = (d.status || d.depositstatus || d.statusname || "").toString().toLowerCase().trim();
   return ["cancel", "cancelled"].includes(s);
 }
 
 // ── Core search ───────────────────────────────────────────────────────────────
 async function searchDepositsByStatus(username, statusType, dayRange = 1, _retry = false) {
-  const session = await getSession(); // dùng chung session với boBrowser.js
+  const session = await getSession();
   const { dateFrom, dateTo, starttime, endtime } = getDateParts(dayRange);
 
   let res;
   try {
-  res = await axios.get(`${BASE}/deposits/search`, {
-    params: {
-      dateFrom, dateTo, starttime, endtime,
-      exactmatch: true,
-      language:   1,
-      limit:      20,
-      offset:     0,
-      playerid:   username,
-      sort:       "DESC",
-      sortcolumn: "deposittime",
-      statusType,
-      timefilter: "deposittime",
-      zoneType:   "ASIA_HO_CHI_MINH",
-    },
-    headers: buildHeaders(session),
-    timeout: 15000,
-  });
-
+    res = await axios.get(`${BASE}/deposits/search`, {
+      params: {
+        dateFrom, dateTo, starttime, endtime,
+        exactmatch: true,
+        language:   1,
+        limit:      20,
+        offset:     0,
+        playerid:   username,
+        sort:       "DESC",
+        sortcolumn: "deposittime",
+        statusType,
+        timefilter: "deposittime",
+        zoneType:   "ASIA_HO_CHI_MINH",
+      },
+      headers: buildHeaders(session),
+      timeout: 15000,
+    });
   } catch (err) {
     if (err.response?.status === 401 && !_retry) {
       logger.warn("AE888 401 — invalidating session, retrying once", { username, statusType });
@@ -165,7 +157,6 @@ async function searchDeposits(username, dayRange = 7) {
 const _depositCache     = new Map();
 const DEPOSIT_CACHE_TTL = 5 * 60 * 1000;
 
-// Sweep cache mỗi 10 phút — tránh memory leak
 setInterval(() => {
   const now = Date.now();
   for (const [key, val] of _depositCache) {
@@ -178,28 +169,41 @@ async function fetchPendingRemark(username) {
   if (!username) return null;
 
   try {
-    // BƯỚC 1: đã lên điểm chưa? — lọc bỏ đơn Cancel/Reject
     const creditedRaw = await searchDepositsByStatus(username, "DEPOSIT_RECORD", 1);
     const credited    = creditedRaw.filter(d => !isCancelledDeposit(d));
-    if (credited.length > 0) {
-      const latest      = pickLatestDeposit(credited);
-      const depositTime = getTime(latest);
 
-      if (Date.now() - depositTime < CREDITED_THRESHOLD_MS) {
-        const minutesAgo = Math.floor((Date.now() - depositTime) / 60000);
+    if (credited.length > 0) {
+      const latestCredited = pickLatestDeposit(credited);
+      const creditedTime   = getTime(latestCredited);
+
+      // ── FIX: check AUDIT có đơn mới hơn credited không ──────────────────────
+      const auditCheck  = await searchDepositsByStatus(username, "DEPOSIT_AUDIT", 1);
+      const latestAudit = pickLatestDeposit(auditCheck);
+      const auditTime   = latestAudit ? getTime(latestAudit) : 0;
+
+      if (auditTime > creditedTime) {
+        // Có đơn audit mới hơn → vẫn còn đơn chờ, không báo alreadyCredited
+        logger.info("AE888 newer audit found after credited — treating as pending", {
+          username,
+          creditedTime: new Date(creditedTime).toISOString(),
+          auditTime:    new Date(auditTime).toISOString(),
+        });
+        // Tiếp tục xuống xử lý đơn audit bên dưới
+      } else if (Date.now() - creditedTime < CREDITED_THRESHOLD_MS) {
+        const minutesAgo = Math.floor((Date.now() - creditedTime) / 60000);
         logger.info("AE888 deposit already credited", {
-          username, depositId: latest?.depositid || null,
-          depositAmt: latest?.depositamt || latest?.inputdepositamt, minutesAgo,
+          username, depositId: latestCredited?.depositid || null,
+          depositAmt: latestCredited?.depositamt || latestCredited?.inputdepositamt, minutesAgo,
         });
         return {
           alreadyCredited: true,
-          depositAmt:  latest?.depositamt || latest?.inputdepositamt || 0,
-          depositTime,
+          depositAmt:  latestCredited?.depositamt || latestCredited?.inputdepositamt || 0,
+          depositTime: creditedTime,
         };
       }
     }
 
-    // BƯỚC 2: đang chờ duyệt — fallback 1 → 7 → 30 ngày
+    // Đang chờ duyệt — fallback 1 → 7 → 30 ngày
     let list = await searchDepositsByStatus(username, "DEPOSIT_AUDIT", 1);
     if (!list.length) list = await searchDepositsByStatus(username, "DEPOSIT_AUDIT", 7);
     if (!list.length) list = await searchDepositsByStatus(username, "DEPOSIT_AUDIT", 30);
@@ -237,16 +241,15 @@ async function lookupDeposit(username) {
 
   let result;
   try {
-    // BƯỚC 1: đã lên điểm? — lọc bỏ đơn Cancel/Reject
+    // BƯỚC 1: lấy đơn credited
     const creditedRaw = await searchDepositsByStatus(username, "DEPOSIT_RECORD", 1);
     if (creditedRaw.length > 0) {
-      // LOG TẠM — xem tên field status trong DEPOSIT_RECORD response
       logger.info("AE888 DEPOSIT_RECORD raw sample", {
         username,
         sample: JSON.stringify(creditedRaw[0]).slice(0, 1000),
       });
     }
-    const credited    = creditedRaw.filter(d => !isCancelledDeposit(d));
+    const credited       = creditedRaw.filter(d => !isCancelledDeposit(d));
     const cancelledCount = creditedRaw.length - credited.length;
     if (cancelledCount > 0) {
       logger.info("AE888 DEPOSIT_RECORD has cancelled entries, falling back to DEPOSIT_AUDIT", {
@@ -254,18 +257,44 @@ async function lookupDeposit(username) {
         cancelledStatuses: creditedRaw.filter(isCancelledDeposit).map(d => d.status),
       });
     }
-    if (credited.length > 0) {
-      const latest      = pickLatestDeposit(credited);
-      const depositTime = getTime(latest);
-      const minutesAgo  = Math.floor((Date.now() - depositTime) / 60000);
 
-      if (Date.now() - depositTime < CREDITED_THRESHOLD_MS) {
+    if (credited.length > 0) {
+      const latestCredited = pickLatestDeposit(credited);
+      const creditedTime   = getTime(latestCredited);
+      const minutesAgo     = Math.floor((Date.now() - creditedTime) / 60000);
+
+      if (Date.now() - creditedTime < CREDITED_THRESHOLD_MS) {
+        // ── FIX: check AUDIT có đơn mới hơn credited không ────────────────────
+        const auditCheck  = await searchDepositsByStatus(username, "DEPOSIT_AUDIT", 1);
+        const latestAudit = pickLatestDeposit(auditCheck);
+        const auditTime   = latestAudit ? getTime(latestAudit) : 0;
+
+        if (auditTime > creditedTime) {
+          // Có đơn audit mới hơn → bỏ qua credited, xử lý đơn đang chờ
+          logger.info("AE888 newer audit found after credited — treating as pending", {
+            username,
+            creditedTime: new Date(creditedTime).toISOString(),
+            auditTime:    new Date(auditTime).toISOString(),
+          });
+          const remark = extractDepositRemark(latestAudit);
+          result = {
+            status:      "pending",
+            remark:      remark || null,
+            depositAmt:  latestAudit?.depositamt || latestAudit?.inputdepositamt || 0,
+            depositTime: auditTime,
+          };
+          logger.info("AE888 lookup: pending (after credited)", { username, remark });
+          _depositCache.set(key, { result, expiry: Date.now() + DEPOSIT_CACHE_TTL });
+          return result;
+        }
+
+        // Không có đơn audit mới hơn → báo credited
         result = {
-          status:     "credited",
-          depositAmt: latest?.depositamt || latest?.inputdepositamt || 0,
-          depositTime,
+          status:      "credited",
+          depositAmt:  latestCredited?.depositamt || latestCredited?.inputdepositamt || 0,
+          depositTime: creditedTime,
           minutesAgo,
-          note: `Đã ghi nhận lúc ${new Date(depositTime).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}`,
+          note: `Đã ghi nhận lúc ${new Date(creditedTime).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}`,
         };
         logger.info("AE888 lookup: credited", { username, minutesAgo });
         _depositCache.set(key, { result, expiry: Date.now() + DEPOSIT_CACHE_TTL });
