@@ -12,6 +12,9 @@ const PAYMENT_CHANNEL_MAP = {
   "AOPAY":   "-5201830589",
   "K8PAY":   "-1003202461748",
   "AFPVN":   "-1003884103210",
+  "DZPAY":   "-5465223752",
+  "TJPPAY":   "-5575050150",
+  
 };
 
 // Tập hợp tất cả Group ID của T3 (để nhận dạng tin nhắn từ nhóm T3)
