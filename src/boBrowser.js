@@ -26,6 +26,12 @@ const BO_PASSWORD  = process.env.BO_PASSWORD;
 // Threshold chung — đồng bộ với st666api.js
 const CREDITED_THRESHOLD_MS = 120 * 60 * 1000; // 120 phút
 
+// Thứ tự tra cứu. DEPOSIT_AUDIT chỉ chứa đơn ĐANG CHỜ DUYỆT, nên khách hủy đơn
+// là nó rời khỏi nhóm này và trả về count 0 dù đơn vừa tạo vài phút trước.
+// DEPOSIT_RECORD là bảng lịch sử, giữ cả đơn đã hủy / đã duyệt / thất bại.
+const STATUS_TYPES = (process.env.BO_STATUS_TYPES || "DEPOSIT_AUDIT,DEPOSIT_RECORD")
+  .split(",").map(s => s.trim()).filter(Boolean);
+
 // ── Session cache + MUTEX ─────────────────────────────────────────────────────
 let _session      = null;
 let _loginPromise = null;
@@ -239,21 +245,74 @@ function isCancelledDeposit(d) {
   return ["cancel", "cancelled", "reject", "rejected", "failed", "fail", "void", "refund"].includes(s);
 }
 
+// ── Helper: chọn bản ghi dùng được ────────────────────────────────────────────
+// BO không lưu mã CK, nên khớp bằng username + đơn gần nhất. Danh sách đã sort
+// DESC theo deposittime, chỉ cần lấy bản ghi ĐẦU TIÊN CÓ remarks.
+function pickWithRemark(list) {
+  return list.find(d => d && typeof d.remarks === "string" && d.remarks.trim()) || null;
+}
+
+function depositTimeOf(d) {
+  const v = d?.deposittime ?? d?.depositTime ?? d?.createtime ?? d?.createTime;
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : Date.parse(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 // ── Public ────────────────────────────────────────────────────────────────────
-async function fetchDepositRemarkByUsername(username) {
-  if (!BO_USERNAME || !BO_PASSWORD) throw new Error("BO_USERNAME / BO_PASSWORD chưa được cấu hình");
+
+/**
+ * Tra mã đơn theo username. Trả về object đầy đủ để phía gọi biết đơn ở trạng thái nào.
+ * @returns {Promise<{remarks:string, statusType:string, status:any, cancelled:boolean, depositTime:number|null, ageMs:number|null}|null>}
+ */
+async function fetchDepositByUsername(username, { maxAgeMs = null, _session: injected = null } = {}) {
+  if (!injected && (!BO_USERNAME || !BO_PASSWORD)) throw new Error("BO_USERNAME / BO_PASSWORD chưa được cấu hình");
   if (!username) return null;
 
   try {
-    const session = await getSession();
-    logger.info("BO API search", { username, hasToken: !!session.authToken });
+    const session = injected || await getSession();
+    logger.info("BO API search", { username, hasToken: !!session.authToken, statusTypes: STATUS_TYPES });
 
-    // DEPOSIT_RECORD đã được lookupDeposit() (ae888api/st666api) check trước rồi.
-    // boBrowser chỉ lấy remarks từ DEPOSIT_AUDIT — không gọi BO 2 lần.
-    const list = await searchByStatus(session, username, "DEPOSIT_AUDIT", 7);
-    if (list.length > 0 && list[0]?.remarks) return list[0].remarks;
+    for (const statusType of STATUS_TYPES) {
+      let list;
+      try {
+        list = await searchByStatus(session, username, statusType, 7);
+      } catch (e) {
+        // Một statusType hỏng không được làm chết cả vòng lặp
+        logger.warn("BO status type failed, thử tiếp", {
+          username, statusType, error: e.message, status: e.response?.status,
+        });
+        if (e.response?.status === 401) throw e;   // 401 thì reset session ở catch ngoài
+        continue;
+      }
 
-    logger.warn("BO deposit remark not found", { username });
+      const hit = pickWithRemark(list);
+      if (!hit) continue;
+
+      const depositTime = depositTimeOf(hit);
+      const ageMs = depositTime ? Date.now() - depositTime : null;
+
+      // Chặn lấy nhầm đơn cũ từ nhiều ngày trước khi bảng lịch sử có nhiều bản ghi
+      if (maxAgeMs && ageMs != null && ageMs > maxAgeMs) {
+        logger.warn("BO deposit tìm thấy nhưng quá cũ, bỏ qua", {
+          username, statusType, ageMinutes: Math.round(ageMs / 60000),
+        });
+        continue;
+      }
+
+      const cancelled = isCancelledDeposit(hit);
+      logger.info("BO deposit remark found", {
+        username, statusType, cancelled, status: hit.status,
+        ageMinutes: ageMs != null ? Math.round(ageMs / 60000) : null,
+      });
+
+      return {
+        remarks: hit.remarks.trim(),
+        statusType, status: hit.status, cancelled, depositTime, ageMs,
+      };
+    }
+
+    logger.warn("BO deposit remark not found", { username, triedStatusTypes: STATUS_TYPES });
     return null;
 
   } catch (err) {
@@ -273,9 +332,22 @@ async function fetchDepositRemarkByUsername(username) {
   }
 }
 
+/** Giữ nguyên chữ ký cũ để các chỗ đang gọi không phải sửa. */
+async function fetchDepositRemarkByUsername(username) {
+  const hit = await fetchDepositByUsername(username);
+  return hit ? hit.remarks : null;
+}
+
 function invalidateSession() {
   _session = null;
   logger.info("BO session invalidated (forced re-login on next call)");
 }
 
-module.exports = { fetchDepositRemarkByUsername, getSession, invalidateSession };
+module.exports = {
+  fetchDepositRemarkByUsername,
+  fetchDepositByUsername,
+  isCancelledDeposit,
+  getSession,
+  invalidateSession,
+  CREDITED_THRESHOLD_MS,
+};
