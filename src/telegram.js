@@ -269,6 +269,22 @@ function addReply(parentId, childId) {
   replyIndex.set(parentId, ch);
 }
 
+// ── Lần ngược cây reply lên tới tin gốc (tin có trong imageCache) ────────────
+// Trả về entry gốc để lấy followChatId. CS có thể reply nhiều tầng (reply vào
+// reply), nên phải đi lên theo parent_id cho tới khi gặp tin gốc.
+function findRootWithFollow(startId) {
+  let id = Number(startId);
+  const seen = new Set();
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    const img = imageCache.get(id);
+    if (img) return img; // tin gốc (ảnh hóa đơn / addManualInvoice) nằm ở imageCache
+    const txt = textCache.get(id);
+    id = txt?.parent_id ? Number(txt.parent_id) : null;
+  }
+  return null;
+}
+
 // ── Lấy status mới nhất theo cached_at (thời gian) ──────────────────────────
 // Dùng cached_at thay vì msgId vì reply từ nhóm T3 có msgId thấp hơn tin gốc CSKH
 function getLatestStatus(rootId) {
@@ -351,7 +367,50 @@ async function indexMessage(msg) {
       saveCache();
       logger.info("Reply indexed", { msgId, parentId, status, note });
     }
+
+    // ── Chuyển reply tay của CS thẳng cho khách ──────────────────────────
+    // Nút "✅ Đã lên điểm" (callback) đã tự báo khách ở nhánh khác. Đây là
+    // trường hợp CS GÕ TAY reply vào tin hóa đơn để giải thích ca đặc biệt
+    // (số tiền không khớp, tạo đơn mới...) — trước đây khách không nhận được.
+    // Chỉ xử lý reply trực tiếp vào tin trong nhóm CS, và chỉ khi tin gốc có
+    // gắn khách theo dõi (followChatId). Bỏ qua tin bot tự gửi và chat nội bộ
+    // không reply vào đâu.
+    if (parentId && !msg.from?.is_bot) {
+      const root = findRootWithFollow(parentId);
+      if (root?.followChatId) {
+        const manualText = (text || "").trim();
+        if (manualText) {
+          maybeForwardManualReply(root, msgId, manualText, status, note);
+        }
+      }
+    }
   }
+}
+
+// Chống gửi trùng: mỗi tin reply của CS chỉ chuyển cho khách 1 lần, kể cả khi
+// Telegram giao update lặp hoặc indexMessage chạy lại.
+const forwardedReplies = new Set();
+
+function maybeForwardManualReply(root, replyMsgId, text, status, note) {
+  if (forwardedReplies.has(replyMsgId)) return;
+  forwardedReplies.add(replyMsgId);
+  if (forwardedReplies.size > 5000) {
+    // gọn bộ nhớ: xoá nửa cũ
+    const arr = [...forwardedReplies];
+    forwardedReplies.clear();
+    for (const id of arr.slice(arr.length / 2)) forwardedReplies.add(id);
+  }
+
+  // Nếu CS gõ đúng câu khớp trạng thái chuẩn (parseReplyText nhận ra status),
+  // gửi kèm ghi chú chuẩn cho gọn. Còn không thì chuyển nguyên văn.
+  const finalStatus = status || null;
+  const finalNote   = note || text;
+
+  logger.info("Forward manual CS reply to customer", {
+    replyMsgId, chatId: root.followChatId, status: finalStatus,
+    preview: text.slice(0, 40),
+  });
+  notifyFollowCustomer(root.followChatId, finalStatus, finalNote);
 }
 
 // ── Tìm theo CK ──────────────────────────────────────────────────────────────
@@ -409,7 +468,7 @@ async function searchInvoiceByAll({ username, fullname, transferContent, imageBu
 // ── Manual index invoice bot tự gửi ───────────────────────────────────────────
 // Bot API thường không gửi update cho chính tin nhắn bot vừa gửi.
 // Server gọi hàm này sau khi gửi hối thúc thành công để đưa hóa đơn vào cache.
-function addManualInvoice({ messageId, username, fullname, ckCode, orderCode, status, note, fileId }) {
+function addManualInvoice({ messageId, username, fullname, ckCode, orderCode, status, note, fileId, followChatId }) {
   const msgId = Number(messageId) || Date.now();
   const entry = {
     message_id:   msgId,
@@ -424,6 +483,10 @@ function addManualInvoice({ messageId, username, fullname, ckCode, orderCode, st
     status:       status || "-",
     note:         note || null,
     cached_at:    Date.now(),
+    // chatId của khách trên bot Follow, gắn ngay lúc tạo — giống tư duy t3Links.
+    // Khi đơn này được forward qua T3 (handleCskhCallback nhánh cskh:forward),
+    // trường này tự động được sao chép sang entry con vì dùng {...root, ...}.
+    followChatId: followChatId || null,
   };
 
   imageCache.set(msgId, entry);
@@ -435,9 +498,40 @@ function addManualInvoice({ messageId, username, fullname, ckCode, orderCode, st
     ck: entry.ck_code,
     status: entry.status,
     note: entry.note,
+    followChatId: entry.followChatId,
   });
 
   return entry;
+}
+
+// ── Tra trạng thái mới nhất của 1 đơn theo rootId (dùng cho follow.js tra cứu
+// chủ động khi khách nhắn lại bot — không còn hỏi BO nữa) ───────────────────
+function getInvoiceStatusByMsgId(rootId) {
+  const root = imageCache.get(Number(rootId));
+  if (!root) return null;
+  const latest = getLatestStatus(Number(rootId));
+  return {
+    status: latest?.status || root.status || "-",
+    note:   latest?.note   || root.note   || null,
+  };
+}
+
+// ── Bắn kết quả trạng thái thẳng về DM khách qua bot Follow ─────────────────
+// Require follow.js TRỄ (lúc gọi hàm, không phải lúc load file) để tránh
+// circular require: follow.js require("./telegram") ở đầu file để dùng
+// addManualInvoice/getInvoiceStatusByMsgId; nếu telegram.js cũng require
+// follow.js ở đầu file, module nào load sau sẽ nhận về object rỗng khi 2
+// module require lẫn nhau ngay lúc khởi động.
+function notifyFollowCustomer(chatId, status, note) {
+  if (!chatId) return;
+  try {
+    const follow = require("./follow");
+    Promise.resolve(follow.sendStatusToCustomer(chatId, status, note)).catch(e => {
+      logger.warn("notifyFollowCustomer send failed", { chatId, error: e.message });
+    });
+  } catch (e) {
+    logger.warn("notifyFollowCustomer failed", { chatId, error: e.message });
+  }
 }
 
 
@@ -468,6 +562,10 @@ async function handleCskhCallback(cb) {
       status: "Đã lên điểm",
       note,
     });
+
+    if (root.followChatId) {
+      notifyFollowCustomer(root.followChatId, "Đã lên điểm", DEFAULT_NOTES["Đã lên điểm"]);
+    }
 
     return answerCallbackQuery(cb.id, "Đã cập nhật: Đã lên điểm");
   }
@@ -592,6 +690,10 @@ async function processT3Reply({ link, t3MsgId, status, note, chatId, msgIdForCac
   const root       = imageCache.get(Number(rootId));
   const username   = root?.username || "-";
   const datetimeVN = formatVNDate(Date.now());
+
+  if (root?.followChatId) {
+    notifyFollowCustomer(root.followChatId, status, note);
+  }
 
   const replyText = [datetimeVN, username, note, status].filter(Boolean).join("\n");
 
@@ -827,4 +929,4 @@ const telegramService = {
   buildCskhKeyboard,
 };
  
-module.exports = { searchInvoiceByAll, telegramService, addRuntimeStatus, getDebugCache, getInvoiceStats, addManualInvoice, addBoCredit, getBoCreditStats };
+module.exports = { searchInvoiceByAll, telegramService, addRuntimeStatus, getDebugCache, getInvoiceStats, addManualInvoice, addBoCredit, getBoCreditStats, getInvoiceStatusByMsgId };
