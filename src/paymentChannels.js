@@ -15,6 +15,7 @@ const PAYMENT_CHANNEL_MAP = {
   "DZPAY":   "-5465223752",
   "TJPAY":   "-5575050150",
   "VNPAY":   "-1003951850591",
+  "HIPAY":   "-1003993760126",  
   
 };
 
