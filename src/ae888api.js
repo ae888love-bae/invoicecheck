@@ -19,6 +19,7 @@ function buildHeaders(session) {
   return {
     "Accept":          "*/*",
     "Accept-Language": "en-US,en;q=0.9",
+    "Content-Type":    "application/json",
     "Origin":          "https://bo.da77ae888.com",
     "Referer":         "https://bo.da77ae888.com/",
     "X-Currency":      "VND2",
@@ -35,8 +36,8 @@ function getDateParts(dayRange = 7) {
   return {
     dateFrom:  startVN,
     dateTo:    todayVN,
-    starttime: new Date(`${startVN}T00:00:00+07:00`).getTime(),
-    endtime:   new Date(`${todayVN}T23:59:59+07:00`).getTime(),
+    startTime: new Date(`${startVN}T00:00:00+07:00`).getTime(),
+    endTime:   new Date(`${todayVN}T23:59:59.999+07:00`).getTime(),
   };
 }
 
@@ -108,24 +109,25 @@ function isCancelledDeposit(d) {
 // ── Core search ───────────────────────────────────────────────────────────────
 async function searchDepositsByStatus(username, statusType, dayRange = 1, _retry = false) {
   const session = await getSession();
-  const { dateFrom, dateTo, starttime, endtime } = getDateParts(dayRange);
+  const { dateFrom, dateTo, startTime, endTime } = getDateParts(dayRange);
 
   let res;
   try {
-    res = await axios.get(`${BASE}/deposits/search`, {
-      params: {
-        dateFrom, dateTo, starttime, endtime,
-        exactmatch: true,
-        language:   1,
-        limit:      20,
-        offset:     0,
-        playerid:   username,
-        sort:       "DESC",
-        sortcolumn: "deposittime",
-        statusType,
-        timefilter: "deposittime",
-        zoneType:   "ASIA_HO_CHI_MINH",
-      },
+    // BO endpoint này nhận POST + body camelCase.
+    // Gọi GET sẽ bị Cloudflare cắt → status 499.
+    res = await axios.post(`${BASE}/deposits/search`, {
+      dateFrom, dateTo, startTime, endTime,
+      exactMatch: true,
+      language:   1,
+      limit:      200,
+      offset:     0,
+      playerId:   username,
+      sort:       "DESC",
+      sortColumn: "deposittime",
+      statusType,
+      timeFilter: "deposittime",
+      zoneType:   "ASIA_HO_CHI_MINH",
+    }, {
       headers: buildHeaders(session),
       timeout: 15000,
     });
