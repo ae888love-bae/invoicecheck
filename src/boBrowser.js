@@ -185,12 +185,13 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
   const startVN   = new Date(now - dayRange * 86_400_000 + 7 * 3600_000).toISOString().slice(0, 10);
   const dateFrom  = startVN;
   const dateTo    = todayVN;
-  const starttime = new Date(dateFrom + "T00:00:00+07:00").getTime();
-  const endtime   = new Date(dateTo   + "T23:59:59.999+07:00").getTime();
+  const startTime = new Date(dateFrom + "T00:00:00+07:00").getTime();
+  const endTime   = new Date(dateTo   + "T23:59:59.999+07:00").getTime();
 
   const headers = {
     "Accept":          "*/*",
     "Accept-Language": "en-US,en;q=0.9",
+    "Content-Type":    "application/json",
     "Origin":          "https://bo.da77ae888.com",
     "Referer":         "https://bo.da77ae888.com/",
     "X-Currency":      "VND2",
@@ -199,20 +200,21 @@ async function searchByStatus(session, username, statusType, dayRange = 1) {
     ...(session.authToken ? { "Authorization": session.authToken } : {}),
   };
 
-  const res = await axios.get(`${BO_API_BASE}/deposits/search`, {
-    params: {
-      dateFrom, dateTo, starttime, endtime,
-      playerid:   username,
-      exactmatch: true,
-      statusType,
-      zoneType:   process.env.AE888_ZONE || "ASIA_HO_CHI_MINH",
-      timefilter: "deposittime",
-      sortcolumn: "deposittime",
-      sort:       "DESC",
-      limit:      20,
-      offset:     0,
-      language:   1,
-    },
+  // BO endpoint này nhận POST + body camelCase.
+  // Gọi GET sẽ bị Cloudflare cắt → status 499.
+  const res = await axios.post(`${BO_API_BASE}/deposits/search`, {
+    dateFrom, dateTo, startTime, endTime,
+    playerId:   username,
+    exactMatch: true,
+    statusType,
+    zoneType:   process.env.AE888_ZONE || "ASIA_HO_CHI_MINH",
+    timeFilter: "deposittime",
+    sortColumn: "deposittime",
+    sort:       "DESC",
+    limit:      200,
+    offset:     0,
+    language:   1,
+  }, {
     headers,
     timeout: 15_000,
   });
